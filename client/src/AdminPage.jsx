@@ -55,6 +55,7 @@ function AdminPage() {
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersError, setOrdersError] = useState("");
   const [updatingOrderId, setUpdatingOrderId] = useState("");
+  const [expandedOrderId, setExpandedOrderId] = useState("");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -409,18 +410,48 @@ function AdminPage() {
           </div>
           <p className="admin-order-note">القيمة إجمالي الطلبات غير الملغاة، وليست تأكيدًا لتحصيل المبلغ. بيانات العميل وطريقة الدفع تظهر مع كل طلب جديد.</p>
           {ordersError && <p className="admin-notice admin-notice--error">{ordersError}</p>}
-          {ordersLoading ? <p className="admin-list-empty">جارٍ تحميل الطلبات...</p> : orders.length ? <div className="admin-orders-list">{orders.map((order) => <article className="admin-order-row" key={order.id}>
-            <div className="admin-order-row__top"><div><small>طلب #{order.id.slice(0, 8).toUpperCase()}</small><time>{new Date(order.createdAt).toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" })}</time></div><strong>{formatEgp(order.totalEgp)}</strong></div>
-            <p>{order.items.map((item) => `${item.name} × ${item.quantity}`).join("، ")}</p>
-            {order.customer && (order.customer.name || order.customer.phone || order.customer.address) && <div className="admin-order-customer">
-              <div className="admin-order-customer__top"><div><small>بيانات العميل</small><strong>{order.customer.name || "—"}</strong></div>{order.customer.phone && <a href={"tel:" + order.customer.phone} dir="ltr">{order.customer.phone}</a>}</div>
-              {(order.customer.governorate || order.customer.city) && <p>{[order.customer.governorate, order.customer.city].filter(Boolean).join("، ")}</p>}
-              {order.customer.address && <p>{order.customer.address}</p>}
-              <div className="admin-order-customer__payment"><span>طريقة الدفع المختارة</span><strong>{order.customer.paymentMethod === "instapay" ? "InstaPay" : "كاش عند الاستلام"}</strong></div>
-              {order.customer.notes && <p><span>ملاحظات:</span> {order.customer.notes}</p>}
-            </div>}
-            <label className="admin-order-status"><span>حالة الطلب</span><select value={order.status} onChange={(event) => updateOrderStatus(order.id, event.target.value)} disabled={updatingOrderId === order.id}>{orderStatusOptions.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select>{updatingOrderId === order.id && <small>جارٍ الحفظ...</small>}</label>
-          </article>)}</div> : <div className="admin-list-empty"><span className="admin-list-empty__icon"><BrandMark /></span><h3>مفيش طلبات لسه</h3><p>الطلبات هتظهر هنا بعد تسجيلها من سلة المتجر.</p></div>}
+          {ordersLoading ? <p className="admin-list-empty">جارٍ تحميل الطلبات...</p> : orders.length ? <div className="admin-orders-list">{orders.map((order) => {
+            const customer = order.customer || {};
+            const isExpanded = expandedOrderId === order.id;
+            const whatsappNumber = String(customer.phone || "").replace(/\D/g, "").replace(/^0/, "20");
+            return <article className="admin-order-row" key={order.id}>
+              <div className="admin-order-row__top"><div><small>طلب #{order.id.slice(0, 8).toUpperCase()}</small><time>{new Date(order.createdAt).toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" })}</time></div><strong>{formatEgp(order.totalEgp)}</strong></div>
+              <div className="admin-order-preview">
+                <div><small>العميل</small><strong>{customer.name || "بيانات العميل غير متاحة"}</strong></div>
+                {customer.phone && <a href={"tel:" + customer.phone} dir="ltr">{customer.phone}</a>}
+              </div>
+              <button className="admin-order-details-toggle" type="button" aria-expanded={isExpanded} aria-controls={isExpanded ? `order-details-${order.id}` : undefined} onClick={() => setExpandedOrderId(isExpanded ? "" : order.id)}>
+                <span>{isExpanded ? "إخفاء تفاصيل الطلب والعميل" : "تفاصيل الطلب والعميل"}</span><span className="admin-order-details-toggle__icon" aria-hidden="true">{isExpanded ? "−" : "+"}</span>
+              </button>
+              {isExpanded && <div className="admin-order-details" id={`order-details-${order.id}`}>
+                <section className="admin-order-details__section" aria-label="تفاصيل المنتجات">
+                  <h3>المنتجات في الطلب</h3>
+                  <ul className="admin-order-items">{(order.items || []).map((item, index) => <li key={`${item.productId || item.name}-${index}`}>
+                    <span><strong>{item.name}</strong><small>{item.quantity} × {formatEgp(item.unitPriceEgp)}</small></span>
+                    <strong>{formatEgp(item.quantity * item.unitPriceEgp)}</strong>
+                  </li>)}</ul>
+                  <div className="admin-order-details__total"><span>إجمالي الطلب</span><strong>{formatEgp(order.totalEgp)}</strong></div>
+                </section>
+                <section className="admin-order-details__section" aria-label="بيانات العميل">
+                  <h3>بيانات العميل والتوصيل</h3>
+                  <dl className="admin-order-customer-grid">
+                    <div><dt>اسم العميل</dt><dd>{customer.name || "غير متاح"}</dd></div>
+                    <div><dt>رقم الموبايل</dt><dd dir="ltr">{customer.phone || "غير متاح"}</dd></div>
+                    <div><dt>المحافظة</dt><dd>{customer.governorate || "غير متاحة"}</dd></div>
+                    <div><dt>المدينة / المنطقة</dt><dd>{customer.city || "غير متاحة"}</dd></div>
+                    <div className="admin-order-customer-grid__wide"><dt>العنوان بالتفصيل</dt><dd>{customer.address || "غير متاح"}</dd></div>
+                    <div><dt>طريقة الدفع</dt><dd>{customer.paymentMethod === "instapay" ? "InstaPay" : "كاش عند الاستلام"}</dd></div>
+                    {customer.notes && <div className="admin-order-customer-grid__wide"><dt>ملاحظات العميل</dt><dd>{customer.notes}</dd></div>}
+                  </dl>
+                  <div className="admin-order-contact-actions">
+                    {customer.phone && <a href={"tel:" + customer.phone}>اتصال بالعميل</a>}
+                    {whatsappNumber && <a href={`https://wa.me/${whatsappNumber}`} target="_blank" rel="noreferrer">مراسلة واتساب</a>}
+                  </div>
+                </section>
+              </div>}
+              <label className="admin-order-status"><span>حالة الطلب</span><select value={order.status} onChange={(event) => updateOrderStatus(order.id, event.target.value)} disabled={updatingOrderId === order.id}>{orderStatusOptions.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select>{updatingOrderId === order.id && <small>جارٍ الحفظ...</small>}</label>
+            </article>;
+          })}</div> : <div className="admin-list-empty"><span className="admin-list-empty__icon"><BrandMark /></span><h3>مفيش طلبات لسه</h3><p>الطلبات هتظهر هنا بعد تسجيلها من سلة المتجر.</p></div>}
         </section>
 
         <section className="admin-panel admin-category-panel">
@@ -481,4 +512,5 @@ function AdminPage() {
 }
 
 export default AdminPage;
+
 
