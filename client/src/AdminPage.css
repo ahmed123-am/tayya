@@ -9,6 +9,20 @@
 .admin-brand small { color: #8f9b9f; font-size: 10px; }
 .admin-back-link { display: inline-flex; align-items: center; min-height: 40px; padding: 0 14px; border: 1px solid var(--line-strong); border-radius: 7px; color: #d9e0e1; font-size: 11px; transition: border-color .2s ease, color .2s ease; }
 .admin-back-link:hover { border-color: var(--copper); color: var(--copper-light); }
+.admin-header__tools { display: flex; align-items: center; gap: 9px; }
+.admin-header__email { color: #9ba7aa; font: 500 10px "Space Grotesk", sans-serif; }
+.admin-logout { min-height: 40px; padding: 0 12px; border: 1px solid rgba(255,255,255,.1); border-radius: 7px; color: #d5dddd; background: transparent; font: 500 10px "Tajawal", sans-serif; cursor: pointer; }
+.admin-logout:hover { border-color: rgba(227,100,20,.5); color: #f1b184; }
+.admin-login-page { display: grid; min-height: 100vh; place-items: center; padding: 24px; }
+.admin-login { display: grid; width: min(100%, 480px); justify-items: center; gap: 15px; padding: clamp(26px, 6vw, 48px); border: 1px solid var(--line-strong); border-radius: 12px; background: linear-gradient(145deg, rgba(37,42,44,.97), rgba(23,26,28,.98)); text-align: center; box-shadow: 0 24px 70px rgba(0,0,0,.25); }
+.admin-login__mark { width: 58px; height: 58px; margin-bottom: 4px; }
+.admin-login .eyebrow { margin: 0; }
+.admin-login h1 { margin: 0; color: var(--ink); font-size: 30px; font-weight: 600; }
+.admin-login > p:not(.admin-notice) { max-width: 360px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.9; }
+.admin-login__button { display: inline-flex; width: 100%; min-height: 48px; flex: initial; align-items: center; justify-content: center; text-decoration: none; }
+.admin-login__button:disabled { cursor: not-allowed; }
+.admin-login .admin-notice { width: 100%; line-height: 1.8; }
+.admin-login .admin-back-link { margin-top: 4px; }
 .admin-content { padding-block: 48px 80px; }
 .admin-page-heading { margin-bottom: 30px; }
 .admin-page-heading h1 { margin: 10px 0 6px; color: var(--ink); font-size: clamp(28px, 3vw, 40px); font-weight: 600; letter-spacing: -.04em; }
@@ -33,6 +47,14 @@
 .admin-order-row__top time { color: #889498; font-size: 9px; }
 .admin-order-row__top > strong { color: #f0f3f3; font-size: 13px; white-space: nowrap; }
 .admin-order-row > p { margin: 13px 0; color: #bac3c5; font-size: 11px; line-height: 1.8; }
+.admin-order-customer { display: grid; gap: 7px; margin: 13px 0; padding: 12px; border: 1px solid rgba(15,76,92,.32); border-radius: 7px; background: rgba(15,76,92,.08); }
+.admin-order-customer__top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.admin-order-customer__top > div { display: grid; gap: 4px; }
+.admin-order-customer__top small, .admin-order-customer__payment span { color: #91a0a4; font-size: 9px; }
+.admin-order-customer__top strong, .admin-order-customer__payment strong { color: #e9eeee; font-size: 11px; }
+.admin-order-customer__top a { color: #f1b184; font: 600 11px "Space Grotesk", "Tajawal", sans-serif; }
+.admin-order-customer > p { margin: 0; color: #bbc5c7; font-size: 10px; line-height: 1.8; overflow-wrap: anywhere; }
+.admin-order-customer__payment { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 7px; border-top: 1px solid rgba(255,255,255,.07); }
 .admin-order-status { display: flex; align-items: center; gap: 9px; color: #a6b0b3; font-size: 10px; }
 .admin-order-status select { min-width: 125px; min-height: 35px; padding: 5px 9px; border: 1px solid rgba(255,255,255,.13); border-radius: 6px; color: #eef1f1; background: #1a1e20; font: inherit; }
 .admin-order-status small { color: #8c989c; }
@@ -106,6 +128,10 @@
 @media (max-width: 560px) {
   .admin-container { width: min(100% - 30px, 520px); }
   .admin-header__inner { min-height: 70px; }
+  .admin-header__inner { gap: 10px; }
+  .admin-header__tools { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .admin-header__email { display: none; }
+  .admin-header__tools .admin-back-link, .admin-logout { min-height: 35px; padding-inline: 9px; font-size: 9px; }
   .admin-content { padding-block: 32px 54px; }
   .admin-panel { padding: 19px 15px; }
   .admin-storefront-form { grid-template-columns: 1fr; }
@@ -127,3 +153,4 @@
   .admin-product-row__image { width: 48px; height: 48px; }
   .admin-product-row__actions { grid-column: 2; flex-wrap: wrap; }
 }
+

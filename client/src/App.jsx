@@ -103,6 +103,7 @@ const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [orderSaving, setOrderSaving] = useState(false);
   const [orderError, setOrderError] = useState("");
   const [submittedOrder, setSubmittedOrder] = useState(null);
+  const [checkoutValues, setCheckoutValues] = useState({ name: "", phone: "", governorate: "", city: "", address: "", paymentMethod: "cash", notes: "" });
   const [modelFile, setModelFile] = useState(null);
   const [modelStats, setModelStats] = useState(null);
   const [modelError, setModelError] = useState("");
@@ -320,7 +321,12 @@ useEffect(() => {
     setOrderError("");
     setCart((current) => current.filter((item) => item.productId !== productId));
   }
-  async function submitCartOrder() {
+  function updateCheckoutValue(event) {
+    const { name, value } = event.target;
+    setCheckoutValues((current) => ({ ...current, [name]: value }));
+  }
+  async function submitCartOrder(event) {
+    event.preventDefault();
     if (!cartItems.length || orderSaving) return;
     setOrderSaving(true);
     setOrderError("");
@@ -328,7 +334,10 @@ useEffect(() => {
       const response = await fetch("/api/orders", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: cartItems.map((item) => ({ productId: item.id, quantity: item.quantity })) }),
+        body: JSON.stringify({
+          customer: checkoutValues,
+          items: cartItems.map((item) => ({ productId: item.id, quantity: item.quantity })),
+        }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || "تعذر تسجيل الطلب.");
@@ -423,21 +432,42 @@ useEffect(() => {
           <div className="container">
             <div className="section-heading"><div><span className="eyebrow"><span /> مشترياتك</span><h2>سلة <em>المجسمات</em></h2></div><p>راجع اختياراتك وعدّل الكمية، والإجمالي بيتحسب تلقائيًا.</p></div>
             {!cartItems.length && submittedOrder ? (
-              <div className="cart-order-confirmation"><span className="cart-order-confirmation__check">✓</span><div><small>تم تسجيل الطلب</small><h3>رقم الطلب {submittedOrder.id.slice(0, 8).toUpperCase()}</h3><p>الإجمالي قبل الشحن: {formatEgp(submittedOrder.totalEgp)}. أكمل بيانات التوصيل عبر واتساب.</p></div><a className="button button--copper" href={`https://wa.me/201095919325?text=${encodeURIComponent(submittedOrderMessage)}`} target="_blank" rel="noreferrer">إكمال الطلب عبر واتساب <ArrowIcon /></a></div>
+              <div className="cart-order-confirmation"><span className="cart-order-confirmation__check">✓</span><div><small>تم تسجيل الطلب</small><h3>رقم الطلب {submittedOrder.id.slice(0, 8).toUpperCase()}</h3><p>الإجمالي قبل الشحن: {formatEgp(submittedOrder.totalEgp)}. هنتواصل معاك على رقمك لتأكيد التوصيل.</p></div><a className="button button--copper" href={`https://wa.me/201095919325?text=${encodeURIComponent(submittedOrderMessage)}`} target="_blank" rel="noreferrer">استفسر عن الطلب عبر واتساب <ArrowIcon /></a></div>
             ) : !cartItems.length ? (
               <div className="cart-empty"><span>＋</span><div><h3>السلة لسه فاضية</h3><p>أضف المجسمات اللي عجبتك وهتلاقيها هنا.</p></div><a className="button button--outline" href="#products">تصفح المنتجات <ArrowIcon /></a></div>
             ) : (
               <div className="cart-layout">
-                <div className="cart-items" aria-label="المنتجات في السلة">
-                  {cartItems.map((item) => <article className="cart-item" key={item.id}>
-                    <div className="cart-item__image">{item.imageUrl && <img src={item.imageUrl} alt="" />}</div>
-                    <div className="cart-item__details"><small>{item.category}</small><h3>{item.name}</h3><p>{formatEgp(item.priceEgp)} للقطعة</p></div>
-                    <div className="cart-item__controls" aria-label={`كمية ${item.name}`}><button type="button" onClick={() => changeCartQuantity(item, -1)} aria-label={`تقليل كمية ${item.name}`}>−</button><span>{item.quantity}</span><button type="button" onClick={() => changeCartQuantity(item, 1)} aria-label={`زيادة كمية ${item.name}`}>＋</button></div>
-                    <strong className="cart-item__line-total">{formatEgp(item.priceEgp * item.quantity)}</strong>
-                    <button className="cart-item__remove" type="button" onClick={() => removeCartItem(item.id)}>حذف</button>
-                  </article>)}
+                <div className="cart-main-column">
+                  <div className="cart-items" aria-label="المنتجات في السلة">
+                    {cartItems.map((item) => <article className="cart-item" key={item.id}>
+                      <div className="cart-item__image">{item.imageUrl && <img src={item.imageUrl} alt="" />}</div>
+                      <div className="cart-item__details"><small>{item.category}</small><h3>{item.name}</h3><p>{formatEgp(item.priceEgp)} للقطعة</p></div>
+                      <div className="cart-item__controls" aria-label={"كمية " + item.name}><button type="button" onClick={() => changeCartQuantity(item, -1)} aria-label={"تقليل كمية " + item.name}>−</button><span>{item.quantity}</span><button type="button" onClick={() => changeCartQuantity(item, 1)} aria-label={"زيادة كمية " + item.name}>＋</button></div>
+                      <strong className="cart-item__line-total">{formatEgp(item.priceEgp * item.quantity)}</strong>
+                      <button className="cart-item__remove" type="button" onClick={() => removeCartItem(item.id)}>حذف</button>
+                    </article>)}
+                  </div>
+                  <form className="checkout-card" id="checkout-form" onSubmit={submitCartOrder}>
+                    <div className="checkout-card__heading"><span className="eyebrow"><span /> بيانات الاستلام</span><h3>بيانات التوصيل والدفع</h3><p>اكتب بياناتك عشان نقدر نأكد الطلب ونوصّله لك.</p></div>
+                    <div className="checkout-fields">
+                      <label className="checkout-field"><span>الاسم بالكامل</span><input type="text" name="name" autoComplete="name" required maxLength="80" value={checkoutValues.name} onChange={updateCheckoutValue} placeholder="اسم المستلم" /></label>
+                      <label className="checkout-field"><span>رقم الموبايل</span><input type="tel" name="phone" autoComplete="tel" required maxLength="20" value={checkoutValues.phone} onChange={updateCheckoutValue} placeholder="01X XXX XXXX" dir="ltr" /></label>
+                      <label className="checkout-field"><span>المحافظة</span><input type="text" name="governorate" autoComplete="address-level1" required maxLength="60" value={checkoutValues.governorate} onChange={updateCheckoutValue} placeholder="مثال: القاهرة" /></label>
+                      <label className="checkout-field"><span>المدينة أو المنطقة</span><input type="text" name="city" autoComplete="address-level2" required maxLength="80" value={checkoutValues.city} onChange={updateCheckoutValue} placeholder="المدينة أو الحي" /></label>
+                      <label className="checkout-field checkout-field--wide"><span>العنوان بالتفصيل</span><textarea name="address" autoComplete="street-address" required maxLength="300" rows="3" value={checkoutValues.address} onChange={updateCheckoutValue} placeholder="اسم الشارع، رقم العمارة، الدور والشقة" /></label>
+                    </div>
+                    <fieldset className="checkout-payment">
+                      <legend>طريقة الدفع</legend>
+                      <div className="checkout-payment__options">
+                        <label className={"checkout-payment__option" + (checkoutValues.paymentMethod === "cash" ? " is-selected" : "")}><input type="radio" name="paymentMethod" value="cash" checked={checkoutValues.paymentMethod === "cash"} onChange={updateCheckoutValue} /><span>كاش عند الاستلام</span></label>
+                        <label className={"checkout-payment__option" + (checkoutValues.paymentMethod === "instapay" ? " is-selected" : "")}><input type="radio" name="paymentMethod" value="instapay" checked={checkoutValues.paymentMethod === "instapay"} onChange={updateCheckoutValue} /><span>تحويل InstaPay</span></label>
+                      </div>
+                      {checkoutValues.paymentMethod === "instapay" && <p className="checkout-payment__hint">حوّل على الرقم <bdi dir="ltr">+201095919325</bdi>، وسيتم تأكيد التحويل بعد مراجعة الطلب.</p>}
+                    </fieldset>
+                    <label className="checkout-field checkout-field--wide"><span>ملاحظات للتوصيل <small>اختياري</small></span><textarea name="notes" maxLength="400" rows="2" value={checkoutValues.notes} onChange={updateCheckoutValue} placeholder="علامة مميزة أو وقت مناسب للاستلام" /></label>
+                  </form>
                 </div>
-                <aside className="cart-summary"><span>عدد القطع: {cartItemCount}</span><div><span>الإجمالي قبل الشحن</span><strong>{formatEgp(cartTotal)}</strong></div>{orderError && <p className="cart-summary__error" role="alert">{orderError}</p>}<button className="button button--copper" type="button" onClick={submitCartOrder} disabled={orderSaving}>{orderSaving ? "جارٍ تسجيل الطلب..." : "تسجيل الطلب"} <ArrowIcon /></button><small>بعد التسجيل تقدر تكمل تفاصيل التوصيل عبر واتساب.</small></aside>
+                <aside className="cart-summary"><span>عدد القطع: {cartItemCount}</span><div><span>الإجمالي قبل الشحن</span><strong>{formatEgp(cartTotal)}</strong></div>{orderError && <p className="cart-summary__error" role="alert">{orderError}</p>}<button className="button button--copper" type="submit" form="checkout-form" disabled={orderSaving}>{orderSaving ? "جارٍ إرسال الطلب..." : "تأكيد الطلب"} <ArrowIcon /></button><small>تكلفة الشحن نأكدها معاك بعد استلام الطلب.</small></aside>
               </div>
             )}
           </div>
@@ -542,6 +572,7 @@ useEffect(() => {
 }
 
 export default App;
+
 
 
 

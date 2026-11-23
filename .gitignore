@@ -29,3 +29,6 @@ work/
 vlc-help.txt
 *.log
 .DS_Store
+.neon
+node_modules/
+

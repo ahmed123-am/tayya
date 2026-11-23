@@ -28,6 +28,10 @@ function formatEgp(value) {
 }
 
 function AdminPage() {
+  const [adminUser, setAdminUser] = useState(null);
+  const [authLoading, setAuthLoading] = useState(true);
+  const [authReady, setAuthReady] = useState(false);
+  const [authMessage, setAuthMessage] = useState("");
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
@@ -54,6 +58,34 @@ function AdminPage() {
 
   useEffect(() => {
     const controller = new AbortController();
+    const authError = new URLSearchParams(window.location.search).get("authError");
+    const messages = {
+      setup: "إعداد قاعدة البيانات أو تسجيل دخول Google لم يكتمل بعد.",
+      signin: "تعذر تسجيل الدخول. حاول مرة أخرى.",
+      "not-allowed": "حساب Google ده مش مضاف كحساب الإدارة.",
+    };
+    if (authError && messages[authError]) setAuthMessage(messages[authError]);
+    fetch("/api/auth/me", { signal: controller.signal })
+      .then(async (response) => {
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 503) {
+          setAuthMessage(data.error || "إعداد قاعدة البيانات وتسجيل الدخول مطلوب.");
+          return;
+        }
+        if (!response.ok) throw new Error(data.error || "تعذر التحقق من حساب الإدارة.");
+        setAuthReady(true);
+        setAdminUser(data.user || null);
+      })
+      .catch((error) => {
+        if (error.name !== "AbortError") setAuthMessage(error.message || "تعذر الاتصال بالخادم.");
+      })
+      .finally(() => setAuthLoading(false));
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    if (!adminUser) return undefined;
+    const controller = new AbortController();
     fetch("/api/products", { signal: controller.signal })
       .then((response) => {
         if (!response.ok) throw new Error("تعذر تحميل المنتجات.");
@@ -65,9 +97,10 @@ function AdminPage() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, []);
+  }, [adminUser]);
 
   useEffect(() => {
+    if (!adminUser) return undefined;
     const controller = new AbortController();
     fetch("/api/categories", { signal: controller.signal })
       .then((response) => {
@@ -86,9 +119,10 @@ function AdminPage() {
         if (error.name !== "AbortError") setCategoryNotice({ type: "error", message: error.message || "تعذر الاتصال بالخادم." });
       });
     return () => controller.abort();
-  }, []);
+  }, [adminUser]);
 
   useEffect(() => {
+    if (!adminUser) return undefined;
     const controller = new AbortController();
     fetch("/api/orders", { signal: controller.signal })
       .then((response) => {
@@ -101,9 +135,10 @@ function AdminPage() {
       })
       .finally(() => setOrdersLoading(false));
     return () => controller.abort();
-  }, []);
+  }, [adminUser]);
 
   useEffect(() => {
+    if (!adminUser) return undefined;
     const controller = new AbortController();
     fetch("/api/storefront-content", { signal: controller.signal })
       .then((response) => {
@@ -117,7 +152,7 @@ function AdminPage() {
         if (error.name !== "AbortError") setContentNotice({ type: "error", message: error.message || "تعذر الاتصال بالخادم." });
       });
     return () => controller.abort();
-  }, []);
+  }, [adminUser]);
 
   useEffect(() => () => {
     if (imagePreview.startsWith("blob:")) URL.revokeObjectURL(imagePreview);
@@ -318,12 +353,43 @@ function AdminPage() {
     }
   }
 
+  async function signOut() {
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => {});
+    window.location.assign("/admin");
+  }
+
+  if (authLoading) {
+    return <main className="admin-page admin-login-page" dir="rtl"><div className="admin-login"><BrandMark className="admin-login__mark" /><p>جارٍ التحقق من حساب الإدارة...</p></div></main>;
+  }
+
+  if (!adminUser) {
+    return (
+      <main className="admin-page admin-login-page" dir="rtl">
+        <section className="admin-login">
+          <BrandMark className="admin-login__mark" />
+          <span className="eyebrow"><span /> إدارة طيّة</span>
+          <h1>لوحة الإدارة</h1>
+          <p>سجّل الدخول بحساب Google المخصص للإدارة لإضافة المنتجات ومتابعة الطلبات.</p>
+          {authMessage && <p className="admin-notice admin-notice--error" role="status">{authMessage}</p>}
+          {authReady
+            ? <a className="admin-submit admin-login__button" href="/api/auth/google">تسجيل الدخول باستخدام Google</a>
+            : <button className="admin-submit admin-login__button" type="button" disabled>إعداد تسجيل الدخول مطلوب</button>}
+          <a className="admin-back-link" href="/">العودة إلى المتجر</a>
+        </section>
+      </main>
+    );
+  }
+
   return (
     <main className="admin-page" dir="rtl">
       <header className="admin-header">
         <div className="admin-container admin-header__inner">
           <a className="admin-brand" href="/"><BrandMark className="admin-brand__mark" /><span><strong>طَيّة</strong><small>إدارة المنتجات</small></span></a>
-          <a className="admin-back-link" href="/">العودة إلى المتجر</a>
+          <div className="admin-header__tools">
+            <span className="admin-header__email" dir="ltr">{adminUser.email}</span>
+            <button className="admin-logout" type="button" onClick={signOut}>تسجيل الخروج</button>
+            <a className="admin-back-link" href="/">العودة إلى المتجر</a>
+          </div>
         </div>
       </header>
 
@@ -341,11 +407,18 @@ function AdminPage() {
             <article><small>قيمة الأوردرات غير الملغاة</small><strong>{formatEgp(activeOrderValue)}</strong></article>
             <article><small>طلبات جديدة</small><strong>{newOrdersCount}</strong></article>
           </div>
-          <p className="admin-order-note">القيمة إجمالي الطلبات غير الملغاة، وليست تأكيدًا لتحصيل المبلغ. الطلبات المسجلة لا تحتوي بيانات شخصية.</p>
+          <p className="admin-order-note">القيمة إجمالي الطلبات غير الملغاة، وليست تأكيدًا لتحصيل المبلغ. بيانات العميل وطريقة الدفع تظهر مع كل طلب جديد.</p>
           {ordersError && <p className="admin-notice admin-notice--error">{ordersError}</p>}
           {ordersLoading ? <p className="admin-list-empty">جارٍ تحميل الطلبات...</p> : orders.length ? <div className="admin-orders-list">{orders.map((order) => <article className="admin-order-row" key={order.id}>
             <div className="admin-order-row__top"><div><small>طلب #{order.id.slice(0, 8).toUpperCase()}</small><time>{new Date(order.createdAt).toLocaleString("ar-EG", { dateStyle: "medium", timeStyle: "short" })}</time></div><strong>{formatEgp(order.totalEgp)}</strong></div>
             <p>{order.items.map((item) => `${item.name} × ${item.quantity}`).join("، ")}</p>
+            {order.customer && (order.customer.name || order.customer.phone || order.customer.address) && <div className="admin-order-customer">
+              <div className="admin-order-customer__top"><div><small>بيانات العميل</small><strong>{order.customer.name || "—"}</strong></div>{order.customer.phone && <a href={"tel:" + order.customer.phone} dir="ltr">{order.customer.phone}</a>}</div>
+              {(order.customer.governorate || order.customer.city) && <p>{[order.customer.governorate, order.customer.city].filter(Boolean).join("، ")}</p>}
+              {order.customer.address && <p>{order.customer.address}</p>}
+              <div className="admin-order-customer__payment"><span>طريقة الدفع المختارة</span><strong>{order.customer.paymentMethod === "instapay" ? "InstaPay" : "كاش عند الاستلام"}</strong></div>
+              {order.customer.notes && <p><span>ملاحظات:</span> {order.customer.notes}</p>}
+            </div>}
             <label className="admin-order-status"><span>حالة الطلب</span><select value={order.status} onChange={(event) => updateOrderStatus(order.id, event.target.value)} disabled={updatingOrderId === order.id}>{orderStatusOptions.map((status) => <option key={status.value} value={status.value}>{status.label}</option>)}</select>{updatingOrderId === order.id && <small>جارٍ الحفظ...</small>}</label>
           </article>)}</div> : <div className="admin-list-empty"><span className="admin-list-empty__icon"><BrandMark /></span><h3>مفيش طلبات لسه</h3><p>الطلبات هتظهر هنا بعد تسجيلها من سلة المتجر.</p></div>}
         </section>
@@ -408,3 +481,4 @@ function AdminPage() {
 }
 
 export default AdminPage;
+

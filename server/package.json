@@ -6,11 +6,15 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
-    "dev": "node --watch index.js"
+    "dev": "node --watch index.js",
+    "telegram:chat-id": "node get-telegram-chat-id.js"
   },
   "dependencies": {
+    "@vercel/blob": "^2.9.0",
     "cors": "^2.8.6",
     "express": "^5.3.0",
-    "multer": "^2.5.0"
+    "multer": "^2.5.0",
+    "pg": "^8.23.1"
   }
 }
+

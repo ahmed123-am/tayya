@@ -2,8 +2,11 @@ const cors = require("cors");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
+const { Readable } = require("node:stream");
 const express = require("express");
 const multer = require("multer");
+const database = require("./database");
+const telegram = require("./telegram");
 
 const app = express();
 const port = Number(process.env.PORT || 5000);
@@ -27,9 +30,11 @@ const allowedMaterials = new Set(["PLA+", "PETG", "ABS", "Resin"]);
 const allowedColors = new Set(["#202124", "#E36414", "#F8F9FA", "#0F4C5C", "#ADB5BD"]);
 const layerHeights = new Set([0.1, 0.2, 0.3]);
 
-fs.mkdirSync(uploadsDirectory, { recursive: true });
-fs.mkdirSync(productImagesDirectory, { recursive: true });
-fs.mkdirSync(dataDirectory, { recursive: true });
+if (process.env.VERCEL !== "1") {
+  fs.mkdirSync(uploadsDirectory, { recursive: true });
+  fs.mkdirSync(productImagesDirectory, { recursive: true });
+  fs.mkdirSync(dataDirectory, { recursive: true });
+}
 
 const allowedOrigins = new Set([
   process.env.CLIENT_ORIGIN || "http://127.0.0.1:5173",
@@ -48,13 +53,7 @@ app.use(
 );
 app.use(express.json({ limit: "1mb" }));
 
-const storage = multer.diskStorage({
-  destination: (_request, _file, callback) => callback(null, uploadsDirectory),
-  filename: (_request, file, callback) => {
-    const extension = path.extname(file.originalname).toLowerCase();
-    callback(null, crypto.randomUUID() + extension);
-  },
-});
+const storage = multer.memoryStorage();
 
 const upload = multer({
   storage,
@@ -69,15 +68,8 @@ const upload = multer({
   },
 });
 
-const productImageStorage = multer.diskStorage({
-  destination: (_request, _file, callback) => callback(null, productImagesDirectory),
-  filename: (_request, file, callback) => {
-    const extension = path.extname(file.originalname).toLowerCase();
-    callback(null, crypto.randomUUID() + extension);
-  },
-});
 const productImageUpload = multer({
-  storage: productImageStorage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 8 * 1024 * 1024, files: 1 },
   fileFilter: (_request, file, callback) => {
     const extension = path.extname(file.originalname).toLowerCase();
@@ -116,6 +108,101 @@ const defaultCategories = [
   },
 ];
 const orderStatuses = new Set(["new", "confirmed", "preparing", "shipped", "completed", "canceled"]);
+const sessionCookieName = "tayya_admin_session";
+const oauthStateCookieName = "tayya_google_state";
+const sessionDurationSeconds = 7 * 24 * 60 * 60;
+
+const seedProducts = JSON.parse(fs.readFileSync(productsFile, "utf8"));
+if (database.isEnabled()) {
+  app.use("/api", (request, _response, next) => {
+    if (request.path === "/health" || request.path === "/estimate") {
+      next();
+      return;
+    }
+    database
+      .initialize({
+        categories: defaultCategories,
+        products: seedProducts,
+        content: defaultStorefrontContent,
+      })
+      .then(() => next())
+      .catch(next);
+  });
+}
+
+function googleAuthConfigured() {
+  return Boolean(
+    database.isEnabled() &&
+      process.env.ADMIN_EMAIL &&
+      process.env.GOOGLE_CLIENT_ID &&
+      process.env.GOOGLE_CLIENT_SECRET &&
+      process.env.GOOGLE_REDIRECT_URI,
+  );
+}
+
+function cookieValue(request, name) {
+  const cookieHeader = request.headers.cookie || "";
+  for (const item of cookieHeader.split(";")) {
+    const separator = item.indexOf("=");
+    if (separator < 0) continue;
+    if (item.slice(0, separator).trim() !== name) continue;
+    return decodeURIComponent(item.slice(separator + 1).trim());
+  }
+  return "";
+}
+
+function setCookie(response, name, value, maxAge, cookiePath = "/api") {
+  const secure = process.env.GOOGLE_REDIRECT_URI?.startsWith("https://");
+  const parts = [
+    `${name}=${encodeURIComponent(value)}`,
+    `Path=${cookiePath}`,
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${maxAge}`,
+  ];
+  if (secure) parts.push("Secure");
+  response.append("Set-Cookie", parts.join("; "));
+}
+
+function clearCookie(response, name, cookiePath = "/api") {
+  const secure = process.env.GOOGLE_REDIRECT_URI?.startsWith("https://");
+  const parts = [`${name}=`, `Path=${cookiePath}`, "HttpOnly", "SameSite=Lax", "Max-Age=0"];
+  if (secure) parts.push("Secure");
+  response.append("Set-Cookie", parts.join("; "));
+}
+
+function requirePersistentStorage(_request, response, next) {
+  if (process.env.VERCEL === "1" && !database.isEnabled()) {
+    response.status(503).json({ error: "اربط قاعدة البيانات المجانية قبل استقبال الطلبات أو حفظ التعديلات." });
+    return;
+  }
+  next();
+}
+
+async function requireAdmin(request, response, next) {
+  if (!googleAuthConfigured()) {
+    response.status(503).json({ error: "إعداد قاعدة البيانات وتسجيل دخول Google مطلوب قبل فتح لوحة الإدارة." });
+    return;
+  }
+  const token = cookieValue(request, sessionCookieName);
+  if (!token) {
+    response.status(401).json({ error: "سجّل الدخول لحساب الإدارة أولًا." });
+    return;
+  }
+  try {
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const session = await database.findAdminSession(tokenHash, process.env.ADMIN_EMAIL);
+    if (!session) {
+      clearCookie(response, sessionCookieName);
+      response.status(401).json({ error: "جلسة الإدارة انتهت. سجّل الدخول مرة أخرى." });
+      return;
+    }
+    request.admin = session;
+    next();
+  } catch (error) {
+    next(error);
+  }
+}
 
 const materialDensitiesGramPerCm3 = {
   "PLA+": 1.24,
@@ -191,6 +278,7 @@ async function removeUploadedFile(file) {
 }
 
 async function readProducts() {
+  if (database.isEnabled()) return database.readProducts();
   try {
     const contents = await fs.promises.readFile(productsFile, "utf8");
     const products = JSON.parse(contents);
@@ -202,12 +290,14 @@ async function readProducts() {
 }
 
 async function writeProducts(products) {
+  if (database.isEnabled()) return database.writeProducts(products);
   const temporaryFile = productsFile + "." + crypto.randomUUID() + ".tmp";
   await fs.promises.writeFile(temporaryFile, JSON.stringify(products, null, 2), "utf8");
   await fs.promises.rename(temporaryFile, productsFile);
 }
 
 async function readCategories() {
+  if (database.isEnabled()) return database.readCategories();
   try {
     const categories = JSON.parse(await fs.promises.readFile(categoriesFile, "utf8"));
     return Array.isArray(categories) ? categories : defaultCategories;
@@ -218,12 +308,14 @@ async function readCategories() {
 }
 
 async function writeCategories(categories) {
+  if (database.isEnabled()) return database.writeCategories(categories);
   const temporaryFile = categoriesFile + "." + crypto.randomUUID() + ".tmp";
   await fs.promises.writeFile(temporaryFile, JSON.stringify(categories, null, 2), "utf8");
   await fs.promises.rename(temporaryFile, categoriesFile);
 }
 
 async function readOrders() {
+  if (database.isEnabled()) return database.readOrders();
   try {
     const orders = JSON.parse(await fs.promises.readFile(ordersFile, "utf8"));
     return Array.isArray(orders) ? orders : [];
@@ -234,12 +326,14 @@ async function readOrders() {
 }
 
 async function writeOrders(orders) {
+  if (database.isEnabled()) return database.writeOrders(orders);
   const temporaryFile = ordersFile + "." + crypto.randomUUID() + ".tmp";
   await fs.promises.writeFile(temporaryFile, JSON.stringify(orders, null, 2), "utf8");
   await fs.promises.rename(temporaryFile, ordersFile);
 }
 
 async function readStorefrontContent() {
+  if (database.isEnabled()) return database.readStorefrontContent(defaultStorefrontContent);
   try {
     const contents = JSON.parse(await fs.promises.readFile(storefrontContentFile, "utf8"));
     return { ...defaultStorefrontContent, ...contents };
@@ -250,6 +344,7 @@ async function readStorefrontContent() {
 }
 
 async function writeStorefrontContent(content) {
+  if (database.isEnabled()) return database.writeStorefrontContent(content);
   const temporaryFile = storefrontContentFile + "." + crypto.randomUUID() + ".tmp";
   await fs.promises.writeFile(temporaryFile, JSON.stringify(content, null, 2), "utf8");
   await fs.promises.rename(temporaryFile, storefrontContentFile);
@@ -277,8 +372,174 @@ async function removeProductImage(imageUrl) {
   await fs.promises.rm(path.join(productImagesDirectory, filename), { force: true }).catch(() => {});
 }
 
+async function persistUpload(file, { kind, productId = "" }) {
+  if (!file) return null;
+  const extension = path.extname(file.originalname).toLowerCase();
+  const filename = crypto.randomUUID() + extension;
+
+  if (process.env.BLOB_READ_WRITE_TOKEN) {
+    const { put } = await import("@vercel/blob");
+    const blob = await put(`${kind}/${filename}`, file.buffer, {
+      access: "private",
+      contentType: file.mimetype,
+    });
+    return {
+      filename: path.basename(blob.pathname),
+      imageUrl: kind === "products" ? `/api/product-images/${productId}` : "",
+      blobPath: blob.pathname,
+      localPath: "",
+    };
+  }
+
+  if (process.env.VERCEL === "1") {
+    throw new Error("وصّل تخزين الملفات المجاني Vercel Blob قبل رفع الصور أو ملفات الطباعة.");
+  }
+
+  const directory = kind === "products" ? productImagesDirectory : uploadsDirectory;
+  await fs.promises.mkdir(directory, { recursive: true });
+  const localPath = path.join(directory, filename);
+  await fs.promises.writeFile(localPath, file.buffer, { flag: "wx" });
+  return {
+    filename,
+    imageUrl: kind === "products" ? `/api/product-images/${filename}` : "",
+    blobPath: "",
+    localPath,
+  };
+}
+
+async function removeStoredProductImage(product) {
+  if (product?.imageBlobPath && process.env.BLOB_READ_WRITE_TOKEN) {
+    const { del } = await import("@vercel/blob");
+    await del(product.imageBlobPath, { access: "private" }).catch(() => {});
+    return;
+  }
+  await removeProductImage(product?.imageUrl);
+}
+
+async function removeStoredUpload(uploaded) {
+  if (uploaded?.blobPath && process.env.BLOB_READ_WRITE_TOKEN) {
+    const { del } = await import("@vercel/blob");
+    await del(uploaded.blobPath, { access: "private" }).catch(() => {});
+    return;
+  }
+  if (uploaded?.localPath) await fs.promises.rm(uploaded.localPath, { force: true }).catch(() => {});
+}
+
 app.get("/api/health", (_request, response) => {
   response.json({ status: "ok", service: "Tayya API" });
+});
+
+app.get("/api/auth/me", async (request, response, next) => {
+  if (!googleAuthConfigured()) {
+    response.status(503).json({ error: "إعداد Neon وحساب Google للإدارة مطلوب أولًا." });
+    return;
+  }
+  const token = cookieValue(request, sessionCookieName);
+  if (!token) {
+    response.json({ user: null });
+    return;
+  }
+  try {
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    const user = await database.findAdminSession(tokenHash, process.env.ADMIN_EMAIL);
+    response.json({ user });
+  } catch (error) {
+    next(error);
+  }
+});
+
+app.get("/api/auth/google", (request, response) => {
+  if (!googleAuthConfigured()) {
+    response.status(503).json({ error: "إعداد Neon وبيانات Google OAuth مطلوب قبل تسجيل الدخول." });
+    return;
+  }
+  const state = crypto.randomBytes(32).toString("base64url");
+  setCookie(response, oauthStateCookieName, state, 10 * 60, "/api/auth");
+  const authorizationUrl = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+  authorizationUrl.search = new URLSearchParams({
+    client_id: process.env.GOOGLE_CLIENT_ID,
+    redirect_uri: process.env.GOOGLE_REDIRECT_URI,
+    response_type: "code",
+    scope: "openid email profile",
+    state,
+    prompt: "select_account",
+  }).toString();
+  response.redirect(302, authorizationUrl.toString());
+});
+
+app.get("/api/auth/google/callback", async (request, response) => {
+  const clientOrigin = process.env.CLIENT_ORIGIN || "http://127.0.0.1:5173";
+  const redirectToAdmin = (errorCode = "") => {
+    const target = new URL("/admin", clientOrigin);
+    if (errorCode) target.searchParams.set("authError", errorCode);
+    response.redirect(302, target.toString());
+  };
+  clearCookie(response, oauthStateCookieName, "/api/auth");
+  if (!googleAuthConfigured()) {
+    redirectToAdmin("setup");
+    return;
+  }
+
+  const expectedState = cookieValue(request, oauthStateCookieName);
+  const receivedState = String(request.query.state || "");
+  const stateMatches = expectedState.length === receivedState.length && expectedState.length > 0 &&
+    crypto.timingSafeEqual(Buffer.from(expectedState), Buffer.from(receivedState));
+  if (!stateMatches || !request.query.code || request.query.error) {
+    redirectToAdmin("signin");
+    return;
+  }
+
+  try {
+    const tokenResponse = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({
+        client_id: process.env.GOOGLE_CLIENT_ID,
+        client_secret: process.env.GOOGLE_CLIENT_SECRET,
+        code: String(request.query.code),
+        grant_type: "authorization_code",
+        redirect_uri: process.env.GOOGLE_REDIRECT_URI,
+      }),
+    });
+    if (!tokenResponse.ok) throw new Error("Google authorization code was rejected.");
+    const tokens = await tokenResponse.json();
+    const profileResponse = await fetch("https://openidconnect.googleapis.com/v1/userinfo", {
+      headers: { Authorization: `Bearer ${tokens.access_token}` },
+    });
+    if (!profileResponse.ok) throw new Error("Could not read Google profile.");
+    const profile = await profileResponse.json();
+    const email = String(profile.email || "").trim().toLowerCase();
+    if (profile.email_verified !== true || email !== process.env.ADMIN_EMAIL.trim().toLowerCase()) {
+      redirectToAdmin("not-allowed");
+      return;
+    }
+
+    const sessionToken = crypto.randomBytes(32).toString("base64url");
+    const sessionTokenHash = crypto.createHash("sha256").update(sessionToken).digest("hex");
+    const expiresAt = new Date(Date.now() + sessionDurationSeconds * 1000);
+    await database.createAdminSession(sessionTokenHash, email, expiresAt);
+    setCookie(response, sessionCookieName, sessionToken, sessionDurationSeconds);
+    redirectToAdmin();
+  } catch (error) {
+    console.error("Google sign-in failed:", error.message);
+    redirectToAdmin("signin");
+  }
+});
+
+app.post("/api/auth/logout", async (request, response, next) => {
+  const token = cookieValue(request, sessionCookieName);
+  clearCookie(response, sessionCookieName);
+  if (!database.isEnabled() || !token) {
+    response.json({ ok: true });
+    return;
+  }
+  try {
+    const tokenHash = crypto.createHash("sha256").update(token).digest("hex");
+    await database.deleteAdminSession(tokenHash);
+    response.json({ ok: true });
+  } catch (error) {
+    next(error);
+  }
 });
 
 app.get("/api/categories", async (_request, response, next) => {
@@ -289,7 +550,7 @@ app.get("/api/categories", async (_request, response, next) => {
   }
 });
 
-app.post("/api/categories", async (request, response, next) => {
+app.post("/api/categories", requireAdmin, async (request, response, next) => {
   const title = String(request.body?.title || "").trim().slice(0, 60);
   if (title.length < 2) {
     response.status(400).json({ error: "اكتب اسمًا للقسم من حرفين على الأقل." });
@@ -310,7 +571,7 @@ app.post("/api/categories", async (request, response, next) => {
   }
 });
 
-app.put("/api/categories/:id", async (request, response, next) => {
+app.put("/api/categories/:id", requireAdmin, async (request, response, next) => {
   const title = String(request.body?.title || "").trim().slice(0, 60);
   if (title.length < 2) {
     response.status(400).json({ error: "اكتب اسمًا للقسم من حرفين على الأقل." });
@@ -341,7 +602,7 @@ app.put("/api/categories/:id", async (request, response, next) => {
   }
 });
 
-app.delete("/api/categories/:id", async (request, response, next) => {
+app.delete("/api/categories/:id", requireAdmin, async (request, response, next) => {
   try {
     const categories = await readCategories();
     const category = categories.find((item) => item.id === request.params.id);
@@ -362,7 +623,7 @@ app.delete("/api/categories/:id", async (request, response, next) => {
   }
 });
 
-app.get("/api/orders", async (_request, response, next) => {
+app.get("/api/orders", requireAdmin, async (_request, response, next) => {
   try {
     response.json({ orders: await readOrders() });
   } catch (error) {
@@ -370,8 +631,35 @@ app.get("/api/orders", async (_request, response, next) => {
   }
 });
 
-app.post("/api/orders", async (request, response, next) => {
+app.post("/api/orders", requirePersistentStorage, async (request, response, next) => {
   try {
+    const customerInput = request.body?.customer || {};
+    const phone = String(customerInput.phone || "")
+      .replace(/[٠-٩]/g, (digit) => "٠١٢٣٤٥٦٧٨٩".indexOf(digit))
+      .replace(/[۰-۹]/g, (digit) => "۰۱۲۳۴۵۶۷۸۹".indexOf(digit))
+      .trim();
+    const customer = {
+      name: String(customerInput.name || "").trim(),
+      phone,
+      governorate: String(customerInput.governorate || "").trim(),
+      city: String(customerInput.city || "").trim(),
+      address: String(customerInput.address || "").trim(),
+      paymentMethod: String(customerInput.paymentMethod || ""),
+      notes: String(customerInput.notes || "").trim(),
+    };
+    const phoneDigits = phone.replace(/\D/g, "");
+    if (
+      customer.name.length < 2 || customer.name.length > 80 ||
+      !/^[+0-9()\s-]{7,20}$/.test(phone) || phoneDigits.length < 7 ||
+      customer.governorate.length < 2 || customer.governorate.length > 60 ||
+      customer.city.length < 2 || customer.city.length > 80 ||
+      customer.address.length < 8 || customer.address.length > 300 ||
+      customer.notes.length > 400 ||
+      !["cash", "instapay"].includes(customer.paymentMethod)
+    ) {
+      response.status(400).json({ error: "راجع الاسم ورقم الموبايل وبيانات العنوان وطريقة الدفع." });
+      return;
+    }
     const requestedItems = request.body?.items;
     if (!Array.isArray(requestedItems) || requestedItems.length < 1 || requestedItems.length > 50) {
       response.status(400).json({ error: "السلة فاضية أو فيها عدد غير صالح من المنتجات." });
@@ -394,27 +682,42 @@ app.post("/api/orders", async (request, response, next) => {
     const order = {
       id: crypto.randomUUID(),
       items: orderItems,
+      customer,
       totalEgp,
       status: "new",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
-    const orders = await readOrders();
-    orders.unshift(order);
-    await writeOrders(orders);
+    if (database.isEnabled()) {
+      await database.insertOrder(order);
+    } else {
+      const orders = await readOrders();
+      orders.unshift(order);
+      await writeOrders(orders);
+    }
+    await telegram.notifyTelegramSafely(() => telegram.orderNotification(order));
     response.status(201).json({ order, message: "تم تسجيل الطلب." });
   } catch (error) {
     next(error);
   }
 });
 
-app.patch("/api/orders/:id", async (request, response, next) => {
+app.patch("/api/orders/:id", requireAdmin, async (request, response, next) => {
   const status = String(request.body?.status || "");
   if (!orderStatuses.has(status)) {
     response.status(400).json({ error: "حالة الطلب غير صالحة." });
     return;
   }
   try {
+    if (database.isEnabled()) {
+      const updatedOrder = await database.updateOrderStatus(request.params.id, status, new Date().toISOString());
+      if (!updatedOrder) {
+        response.status(404).json({ error: "الطلب المطلوب غير موجود." });
+        return;
+      }
+      response.json({ order: updatedOrder });
+      return;
+    }
     const orders = await readOrders();
     const orderIndex = orders.findIndex((order) => order.id === request.params.id);
     if (orderIndex < 0) {
@@ -437,7 +740,7 @@ app.get("/api/storefront-content", async (_request, response, next) => {
   }
 });
 
-app.put("/api/storefront-content", async (request, response, next) => {
+app.put("/api/storefront-content", requireAdmin, async (request, response, next) => {
   const content = {
     titlePrimary: String(request.body?.titlePrimary || "").trim().slice(0, 80),
     titleAccent: String(request.body?.titleAccent || "").trim().slice(0, 80),
@@ -463,13 +766,17 @@ app.get("/api/products", async (_request, response, next) => {
   }
 });
 
-app.post("/api/products", productImageUpload.single("image"), async (request, response, next) => {
+app.post("/api/products", requirePersistentStorage, requireAdmin, productImageUpload.single("image"), async (request, response, next) => {
+  let storedImage;
   try {
     const fields = normalizeProductInput(request.body || {});
+    const id = crypto.randomUUID();
+    storedImage = request.file ? await persistUpload(request.file, { kind: "products", productId: id }) : null;
     const product = {
-      id: crypto.randomUUID(),
+      id,
       ...fields,
-      imageUrl: request.file ? "/api/product-images/" + request.file.filename : "",
+      imageUrl: storedImage?.imageUrl || "",
+      imageBlobPath: storedImage?.blobPath || "",
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -478,7 +785,7 @@ app.post("/api/products", productImageUpload.single("image"), async (request, re
     await writeProducts(products);
     response.status(201).json({ product });
   } catch (error) {
-    await removeUploadedFile(request.file);
+    await removeStoredUpload(storedImage);
     if (error instanceof SyntaxError || error.message?.startsWith("اكتب ")) {
       response.status(400).json({ error: error.message });
       return;
@@ -487,7 +794,8 @@ app.post("/api/products", productImageUpload.single("image"), async (request, re
   }
 });
 
-app.put("/api/products/:id", productImageUpload.single("image"), async (request, response, next) => {
+app.put("/api/products/:id", requirePersistentStorage, requireAdmin, productImageUpload.single("image"), async (request, response, next) => {
+  let storedImage;
   try {
     const products = await readProducts();
     const productIndex = products.findIndex((product) => product.id === request.params.id);
@@ -505,23 +813,27 @@ app.put("/api/products/:id", productImageUpload.single("image"), async (request,
       return;
     }
     const currentProduct = products[productIndex];
+    storedImage = request.file
+      ? await persistUpload(request.file, { kind: "products", productId: currentProduct.id })
+      : null;
     const updatedProduct = {
       ...currentProduct,
       ...fields,
-      imageUrl: request.file ? "/api/product-images/" + request.file.filename : currentProduct.imageUrl,
+      imageUrl: storedImage?.imageUrl || currentProduct.imageUrl,
+      imageBlobPath: storedImage?.blobPath || currentProduct.imageBlobPath || "",
       updatedAt: new Date().toISOString(),
     };
     products[productIndex] = updatedProduct;
     await writeProducts(products);
-    if (request.file && currentProduct.imageUrl) await removeProductImage(currentProduct.imageUrl);
+    if (request.file && currentProduct.imageUrl) await removeStoredProductImage(currentProduct);
     response.json({ product: updatedProduct });
   } catch (error) {
-    await removeUploadedFile(request.file);
+    await removeStoredUpload(storedImage);
     next(error);
   }
 });
 
-app.delete("/api/products/:id", async (request, response, next) => {
+app.delete("/api/products/:id", requirePersistentStorage, requireAdmin, async (request, response, next) => {
   try {
     const products = await readProducts();
     const productIndex = products.findIndex((product) => product.id === request.params.id);
@@ -532,7 +844,7 @@ app.delete("/api/products/:id", async (request, response, next) => {
     const [deletedProduct] = products.splice(productIndex, 1);
     await writeProducts(products);
     if (deletedProduct.imageUrl && !products.some((product) => product.imageUrl === deletedProduct.imageUrl)) {
-      await removeProductImage(deletedProduct.imageUrl);
+      await removeStoredProductImage(deletedProduct);
     }
     response.json({ id: deletedProduct.id, message: "تم حذف المنتج." });
   } catch (error) {
@@ -540,6 +852,27 @@ app.delete("/api/products/:id", async (request, response, next) => {
   }
 });
 
+app.get("/api/product-images/:imageId", async (request, response, next) => {
+  try {
+    const product = (await readProducts()).find((item) => item.id === request.params.imageId && item.imageBlobPath);
+    if (!product) {
+      next();
+      return;
+    }
+    const { get } = await import("@vercel/blob");
+    const blob = await get(product.imageBlobPath, { access: "private" });
+    if (!blob) {
+      response.status(404).end();
+      return;
+    }
+    response.setHeader("Content-Type", blob.blob.contentType || "application/octet-stream");
+    response.setHeader("X-Content-Type-Options", "nosniff");
+    response.setHeader("Cache-Control", "public, max-age=300");
+    Readable.fromWeb(blob.stream).pipe(response);
+  } catch (error) {
+    next(error);
+  }
+});
 app.use("/api/product-images", express.static(productImagesDirectory, { maxAge: "1d" }));
 
 app.post("/api/estimate", (request, response) => {
@@ -550,7 +883,8 @@ app.post("/api/estimate", (request, response) => {
   }
 });
 
-app.post("/api/quotes", upload.single("model"), async (request, response, next) => {
+app.post("/api/quotes", requirePersistentStorage, upload.single("model"), async (request, response, next) => {
+  let storedUpload;
   try {
     const name = String(request.body.name || "").trim();
     const phone = normalizePhone(request.body.phone);
@@ -580,13 +914,15 @@ app.post("/api/quotes", upload.single("model"), async (request, response, next) 
       .basename(request.file.originalname)
       .replace(/[\r\n\t]/g, " ")
       .slice(0, 120);
+    storedUpload = await persistUpload(request.file, { kind: "quotes" });
     const record = {
       id: quoteId,
       createdAt: new Date().toISOString(),
       name,
       phone,
       originalFileName: originalName,
-      storedFileName: request.file.filename,
+      storedFileName: storedUpload.filename,
+      fileBlobPath: storedUpload.blobPath || "",
       material: request.body.material,
       color: request.body.color,
       infill: Number(request.body.infill),
@@ -598,13 +934,16 @@ app.post("/api/quotes", upload.single("model"), async (request, response, next) 
       status: "pending-review",
     };
 
-    await fs.promises.appendFile(quotesFile, JSON.stringify(record) + "\n", "utf8");
+    if (database.isEnabled()) await database.insertQuote(record);
+    else await fs.promises.appendFile(quotesFile, JSON.stringify(record) + "\n", "utf8");
+    await telegram.notifyTelegramSafely(() => telegram.quoteNotification(record));
     response.status(201).json({
       id: quoteId,
       estimate,
       message: "تم تسجيل طلب التسعير للمراجعة.",
     });
   } catch (error) {
+    await removeStoredUpload(storedUpload);
     next(error);
   }
 });
@@ -625,6 +964,10 @@ app.use("/api", (_request, response) => {
 });
 
 app.use((error, request, response, _next) => {
+  if (error.message?.startsWith("وصّل تخزين الملفات")) {
+    response.status(503).json({ error: error.message });
+    return;
+  }
   if (error instanceof multer.MulterError) {
     const message =
       error.code === "LIMIT_FILE_SIZE"
@@ -650,4 +993,5 @@ app.use((error, request, response, _next) => {
 app.listen(port, () => {
   console.log("Tayya API listening on http://localhost:" + port);
 });
+
 
