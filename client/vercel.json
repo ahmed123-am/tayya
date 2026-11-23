@@ -4,6 +4,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://server-gg-8d76.vercel.app/api/:path*"
+    },
+    {
+      "source": "/admin",
+      "destination": "/index.html"
     }
   ]
 }
