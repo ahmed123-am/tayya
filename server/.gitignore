@@ -1,0 +1,10 @@
+node_modules/
+uploads/*
+!uploads/.gitkeep
+!uploads/products/
+uploads/products/*
+!uploads/products/one-piece-*.png
+data/orders.json
+data/quotes.jsonl
+data/*.sqlite
+data/*.db

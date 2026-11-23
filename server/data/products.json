@@ -1,0 +1,52 @@
+[
+  {
+    "name": "لوفي",
+    "category": "ون بيس",
+    "priceEgp": 450,
+    "description": "مجسم لوفي من ون بيس بقبعته الشهيرة.",
+    "updatedAt": "2026-11-23T16:15:16.815066+02:00",
+    "id": "0089ee13-6aca-4a2a-8e65-9a1c46456b13",
+    "imageUrl": "/api/product-images/one-piece-luffy.png",
+    "createdAt": "2026-11-23T16:15:16.815066+02:00"
+  },
+  {
+    "name": "زورو",
+    "category": "ون بيس",
+    "priceEgp": 500,
+    "description": "مجسم زورو من ون بيس مع سيوفه.",
+    "updatedAt": "2026-11-23T16:15:16.815066+02:00",
+    "id": "0a895fe4-8a5a-4d7b-9dc4-2b1cc5e411a6",
+    "imageUrl": "/api/product-images/one-piece-zoro.png",
+    "createdAt": "2026-11-23T16:15:16.815066+02:00"
+  },
+  {
+    "name": "إيس",
+    "category": "ون بيس",
+    "priceEgp": 480,
+    "description": "مجسم إيس من ون بيس مع تأثيرات اللهب.",
+    "updatedAt": "2026-11-23T16:15:16.815066+02:00",
+    "id": "aa138028-61c4-4fbd-826e-f2657dea6b65",
+    "imageUrl": "/api/product-images/one-piece-ace.png",
+    "createdAt": "2026-11-23T16:15:16.815066+02:00"
+  },
+  {
+    "name": "سانجي",
+    "category": "ون بيس",
+    "priceEgp": 420,
+    "description": "مجسم سانجي من ون بيس في وضعية الركلة.",
+    "updatedAt": "2026-11-23T16:15:16.815066+02:00",
+    "id": "205c939b-8531-4507-9051-3889da2ea4e5",
+    "imageUrl": "/api/product-images/one-piece-sanji.png",
+    "createdAt": "2026-11-23T16:15:16.815066+02:00"
+  },
+  {
+    "name": "نامي",
+    "category": "ون بيس",
+    "priceEgp": 380,
+    "description": "مجسم نامي من ون بيس مع عصاها.",
+    "updatedAt": "2026-11-23T16:15:16.815066+02:00",
+    "id": "a64cf877-1f47-4754-bf1a-1c3ad25b95f2",
+    "imageUrl": "/api/product-images/one-piece-nami.png",
+    "createdAt": "2026-11-23T16:15:16.815066+02:00"
+  }
+]
