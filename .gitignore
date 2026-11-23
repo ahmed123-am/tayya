@@ -1,0 +1,31 @@
+# Dependencies and generated builds
+**/node_modules/
+client/dist/
+server/dist/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Local orders, quotes, and databases
+server/data/orders.json
+server/data/quotes.jsonl
+server/data/*.sqlite
+server/data/*.db
+
+# Uploaded files are private by default; keep only current catalog images
+server/uploads/*
+!server/uploads/.gitkeep
+!server/uploads/products/
+server/uploads/products/*
+!server/uploads/products/one-piece-*.png
+
+# Scratch files
+work/
+vlc-help.txt
+*.log
+.DS_Store
